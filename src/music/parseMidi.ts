@@ -58,6 +58,18 @@ export function readMidi(data: ArrayBuffer | Uint8Array): MidiFileInfo {
   }
 }
 
+/** Primeiro e último compasso (1 = primeiro) em que a trilha tem notas. */
+export function trackBarRange(info: MidiFileInfo, trackIndex: number): { first: number; last: number } {
+  const notes = info.midi.tracks[trackIndex]?.notes ?? []
+  if (notes.length === 0) return { first: 1, last: info.totalBars }
+  const ppq = info.midi.header.ppq
+  const barOf = (ticks: number) => Math.floor(ticks / ppq / info.beatsPerBar) + 1
+  return {
+    first: barOf(Math.min(...notes.map((n) => n.ticks))),
+    last: barOf(Math.max(...notes.map((n) => n.ticks))),
+  }
+}
+
 const quantize = (beats: number) => Math.max(0.25, Math.round(beats * 4) / 4)
 
 export interface TrackToMelodyOptions {

@@ -1,6 +1,6 @@
 import { Midi } from '@tonejs/midi'
 import { describe, expect, it } from 'vitest'
-import { readMidi, trackToMelody } from './parseMidi'
+import { readMidi, trackBarRange, trackToMelody } from './parseMidi'
 import { isNote } from './types'
 
 function buildMidi() {
@@ -51,6 +51,12 @@ describe('parseMidi', () => {
     const notes = items.filter(isNote).map((n) => `${n.midi}:${n.dur}`)
     expect(notes).toEqual(['72:1', '74:1', '76:2', '79:1', '77:1', '76:1', '74:4'])
     expect(items.some((i) => i.kind === 'note' && i.midi === null && i.dur === 1)).toBe(true)
+  })
+
+  it('faixa de compassos com notas da trilha', () => {
+    const info = readMidi(buildMidi())
+    expect(trackBarRange(info, 1)).toEqual({ first: 1, last: 3 })
+    expect(trackBarRange(info, 0)).toEqual({ first: 1, last: 4 })
   })
 
   it('recorta por compassos', () => {

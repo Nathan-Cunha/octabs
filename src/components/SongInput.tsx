@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { readMidi, trackToMelody, type MidiFileInfo } from '../music/parseMidi'
+import { readMidi, trackBarRange, trackToMelody, type MidiFileInfo } from '../music/parseMidi'
 import { parseText } from '../music/parseText'
 import { isNote, type MelodyItem } from '../music/types'
 import {
@@ -157,15 +157,21 @@ function MidiTab({ onCreate }: { onCreate(data: NewSongData): void }) {
   )
   const noteCount = items.filter(isNote).length
 
+  // Por padrão pega a música inteira: do primeiro ao último compasso com notas na trilha.
+  function selectTrack(i: MidiFileInfo, index: number) {
+    const range = trackBarRange(i, index)
+    setTrack(index)
+    setFromBar(range.first)
+    setToBar(range.last)
+  }
+
   async function load(file: File) {
     setError('')
     try {
       const i = readMidi(new Uint8Array(await file.arrayBuffer()))
       setInfo(i)
       setFileName(file.name)
-      setTrack(i.suggested)
-      setFromBar(1)
-      setToBar(Math.min(8, i.totalBars))
+      selectTrack(i, i.suggested)
     } catch {
       setInfo(null)
       setError('Não consegui ler esse arquivo. Ele é mesmo um MIDI (.mid)?')
@@ -201,7 +207,7 @@ function MidiTab({ onCreate }: { onCreate(data: NewSongData): void }) {
           <p>
             <label>
               Trilha
-              <select value={track} onChange={(e) => setTrack(Number(e.target.value))} style={{ width: '100%' }}>
+              <select value={track} onChange={(e) => selectTrack(info, Number(e.target.value))} style={{ width: '100%' }}>
                 {info.tracks.map((t) => (
                   <option key={t.index} value={t.index} disabled={t.noteCount === 0}>
                     {t.name}
