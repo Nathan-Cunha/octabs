@@ -6,8 +6,8 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 # Sites que podem chamar a busca (separados por vírgula).
 ALLOWED_ORIGINS = "https://nathan-cunha.github.io,http://localhost:5173"
-# Modelo usado na busca. claude-opus-5 é o mais preciso; claude-sonnet-5 custa menos.
-MODEL = "claude-opus-5"
+# Modelo usado na busca. claude-sonnet-5 custa menos; claude-opus-5 é mais preciso (≈2,5x mais caro).
+MODEL = "claude-sonnet-5"
 
 # Segredos (não ficam no código). Configure com:
 #   npx wrangler secret put ANTHROPIC_API_KEY

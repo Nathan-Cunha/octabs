@@ -34,9 +34,9 @@ No app: **+ Nova → Buscar → Configurar**, cole o endereço do Worker e o mes
 
 ## Custos
 
-- Modelo padrão `claude-opus-5` (mais preciso): em geral alguns centavos de dólar por busca, dependendo de quantas páginas ele lê.
-- Para gastar menos, troque `MODEL` em `wrangler.toml` para `claude-sonnet-5` e rode `npx wrangler deploy` de novo.
-- Cada busca na web custa US$ 10 por 1.000 buscas (máximo de 5 por música).
+- Modelo padrão `claude-sonnet-5` (mais barato). Para mais precisão, troque `MODEL` em `wrangler.toml` para `claude-opus-5` (≈2,5x mais caro) e rode `npx wrangler deploy` de novo.
+- Cada busca na web custa US$ 10 por 1.000 buscas (máximo de 3 por música, em até 3 rodadas).
+- O gasto estimado de cada rodada aparece nos logs: `npx wrangler tail octabs-search`.
 - Dá para definir um limite de gasto mensal no console da Anthropic (Settings → Limits).
 
 ## Desenvolvimento

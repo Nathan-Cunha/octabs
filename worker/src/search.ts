@@ -58,6 +58,23 @@ const SUBMIT_TOOL = {
 // Cada rodada reenvia o histórico (com os resultados da busca); poucas rodadas limitam o gasto.
 const MAX_TURNS = 3
 
+// Preço por milhão de tokens (entrada/saída) para estimar o gasto nos logs (`wrangler tail`).
+const PRICES: Record<string, [number, number]> = {
+  'claude-sonnet-5': [2, 10],
+  'claude-opus-5': [5, 25],
+}
+
+function logUsage(model: string, turn: number, response: Anthropic.Beta.BetaMessage) {
+  const u = response.usage
+  const searches = u.server_tool_use?.web_search_requests ?? 0
+  const [inPrice, outPrice] = PRICES[model] ?? [0, 0]
+  const input = u.input_tokens + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0)
+  const usd = (input * inPrice + u.output_tokens * outPrice) / 1e6 + searches * 0.01
+  console.log(
+    `usage turn=${turn} model=${response.model} stop=${response.stop_reason} in=${input} out=${u.output_tokens} searches=${searches} ~US$${usd.toFixed(3)}`,
+  )
+}
+
 /** Traduz erros da API em mensagens úteis para o app (sem expor detalhes internos). */
 function toSearchError(e: unknown): Error {
   console.error('anthropic api error', e)
@@ -98,6 +115,7 @@ export async function searchMelody(query: string, env: SearchEnv): Promise<Searc
     } catch (e) {
       throw toSearchError(e)
     }
+    logUsage(model, turn, response)
 
     for (const block of response.content) {
       if (block.type === 'tool_use' && block.name === 'submit_melody') return normalize(block.input)
