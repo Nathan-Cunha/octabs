@@ -1,13 +1,22 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import { readMidi, trackToMelody, type MidiFileInfo } from '../music/parseMidi'
 import { parseText } from '../music/parseText'
 import { isNote, type MelodyItem } from '../music/types'
+import {
+  loadAiSettings,
+  saveAiSettings,
+  searchMelody,
+  type AiSettings,
+  type MelodySearchResult,
+} from '../search/aiSearch'
 
-type Tab = 'paste' | 'midi' | 'ai'
+type Tab = 'ai' | 'paste' | 'midi'
 
 export interface NewSongData {
   title: string
   items: MelodyItem[]
   source?: string
+  bpm?: number
 }
 
 interface Props {
@@ -16,12 +25,22 @@ interface Props {
 }
 
 export function SongInput({ onCreate, onCancel }: Props) {
-  const [tab, setTab] = useState<Tab>('paste')
+  const [tab, setTab] = useState<Tab>(() => (loadAiSettings().workerUrl ? 'ai' : 'paste'))
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
+  const [source, setSource] = useState<string | undefined>()
+  const [bpm, setBpm] = useState<number | undefined>()
 
   const parsed = useMemo(() => parseText(text), [text])
   const noteCount = parsed.items.filter(isNote).length
+
+  function fillFromSearch(r: MelodySearchResult) {
+    setTitle(r.title)
+    setText(r.notes)
+    setSource(r.sourceUrl ?? r.sourceName ?? 'busca')
+    setBpm(r.bpm ?? undefined)
+    setTab('paste')
+  }
 
   return (
     <div>
@@ -38,12 +57,14 @@ export function SongInput({ onCreate, onCancel }: Props) {
             Buscar
           </button>
           <button role="tab" aria-selected={tab === 'paste'} onClick={() => setTab('paste')}>
-            Colar notas
+            Notas
           </button>
           <button role="tab" aria-selected={tab === 'midi'} onClick={() => setTab('midi')}>
             MIDI
           </button>
         </div>
+
+        {tab === 'ai' && <AiTab onResult={fillFromSearch} />}
 
         {tab === 'paste' && (
           <>
@@ -85,6 +106,18 @@ export function SongInput({ onCreate, onCancel }: Props) {
                 <li>O tom é ajustado automaticamente para caber na ocarina.</li>
               </ul>
             </details>
+            {source && (
+              <p className="hint">
+                Fonte:{' '}
+                {source.startsWith('http') ? (
+                  <a href={source} target="_blank" rel="noreferrer">
+                    {source}
+                  </a>
+                ) : (
+                  source
+                )}
+              </p>
+            )}
             <p className="hint">
               {noteCount} nota{noteCount === 1 ? '' : 's'}
               {parsed.unknown.length > 0 && (
@@ -95,7 +128,7 @@ export function SongInput({ onCreate, onCancel }: Props) {
               className="btn primary"
               disabled={noteCount === 0}
               onClick={() =>
-                onCreate({ title: title.trim() || 'Sem título', items: parsed.items, source: 'colado' })
+                onCreate({ title: title.trim() || 'Sem título', items: parsed.items, source: source ?? 'colado', bpm })
               }
             >
               Gerar tablatura
@@ -103,9 +136,240 @@ export function SongInput({ onCreate, onCancel }: Props) {
           </>
         )}
 
-        {tab === 'midi' && <p className="empty">Importar arquivo MIDI — em breve.</p>}
-        {tab === 'ai' && <p className="empty">Busca por nome da música — em breve.</p>}
+        {tab === 'midi' && <MidiTab onCreate={onCreate} />}
       </div>
     </div>
+  )
+}
+
+function MidiTab({ onCreate }: { onCreate(data: NewSongData): void }) {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [info, setInfo] = useState<MidiFileInfo | null>(null)
+  const [fileName, setFileName] = useState('')
+  const [track, setTrack] = useState(0)
+  const [fromBar, setFromBar] = useState(1)
+  const [toBar, setToBar] = useState(8)
+  const [error, setError] = useState('')
+
+  const items = useMemo(
+    () => (info ? trackToMelody(info, track, { fromBar, toBar: Math.max(fromBar, toBar) }) : []),
+    [info, track, fromBar, toBar],
+  )
+  const noteCount = items.filter(isNote).length
+
+  async function load(file: File) {
+    setError('')
+    try {
+      const i = readMidi(new Uint8Array(await file.arrayBuffer()))
+      setInfo(i)
+      setFileName(file.name)
+      setTrack(i.suggested)
+      setFromBar(1)
+      setToBar(Math.min(8, i.totalBars))
+    } catch {
+      setInfo(null)
+      setError('Não consegui ler esse arquivo. Ele é mesmo um MIDI (.mid)?')
+    }
+  }
+
+  return (
+    <>
+      <p className="hint">
+        Baixe o MIDI da música (por exemplo no MuseScore ou em bitmidi.com) e escolha a trilha da melodia.
+      </p>
+      <button className="btn" onClick={() => fileRef.current?.click()}>
+        {info ? 'Trocar arquivo' : 'Escolher arquivo MIDI'}
+      </button>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".mid,.midi,audio/midi,audio/x-midi"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (f) void load(f)
+          e.target.value = ''
+        }}
+      />
+      {error && <p className="warn">{error}</p>}
+
+      {info && (
+        <>
+          <p className="hint">
+            {fileName} · {info.totalBars} compassos · {info.bpm} bpm
+          </p>
+          <p>
+            <label>
+              Trilha
+              <select value={track} onChange={(e) => setTrack(Number(e.target.value))} style={{ width: '100%' }}>
+                {info.tracks.map((t) => (
+                  <option key={t.index} value={t.index} disabled={t.noteCount === 0}>
+                    {t.name}
+                    {t.instrument ? ` (${t.instrument})` : ''} · {t.noteCount} notas
+                    {t.isDrum ? ' · percussão' : ''}
+                    {t.index === info.suggested ? ' ★ melodia?' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </p>
+          <div className="row">
+            <label>
+              Do compasso{' '}
+              <input
+                type="number"
+                min={1}
+                max={info.totalBars}
+                value={fromBar}
+                onChange={(e) => setFromBar(Math.max(1, Number(e.target.value)))}
+                style={{ width: 70 }}
+              />
+            </label>
+            <label>
+              até{' '}
+              <input
+                type="number"
+                min={fromBar}
+                max={info.totalBars}
+                value={toBar}
+                onChange={(e) => setToBar(Number(e.target.value))}
+                style={{ width: 70 }}
+              />
+            </label>
+          </div>
+          <p className="hint">{noteCount} notas no trecho</p>
+          <button
+            className="btn primary"
+            disabled={noteCount === 0}
+            onClick={() =>
+              onCreate({
+                title: fileName.replace(/\.midi?$/i, '').replace(/[_-]+/g, ' '),
+                items,
+                source: fileName,
+                bpm: info.bpm,
+              })
+            }
+          >
+            Gerar tablatura
+          </button>
+        </>
+      )}
+    </>
+  )
+}
+
+function AiTab({ onResult }: { onResult(r: MelodySearchResult): void }) {
+  const [settings, setSettings] = useState<AiSettings>(loadAiSettings)
+  const [editing, setEditing] = useState(!settings.workerUrl)
+  const [query, setQuery] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [result, setResult] = useState<MelodySearchResult | null>(null)
+  const abort = useRef<AbortController | null>(null)
+
+  async function run() {
+    abort.current?.abort()
+    const ctrl = new AbortController()
+    abort.current = ctrl
+    setLoading(true)
+    setError('')
+    setResult(null)
+    try {
+      setResult(await searchMelody(query, settings, ctrl.signal))
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') setError((e as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (editing) {
+    return (
+      <>
+        <p className="hint">
+          Configure uma vez o endereço do seu Worker da busca e o token (ficam salvos só neste aparelho).
+        </p>
+        <p>
+          <input
+            type="url"
+            placeholder="https://octabs-search.SEU-USUARIO.workers.dev"
+            value={settings.workerUrl}
+            onChange={(e) => setSettings({ ...settings, workerUrl: e.target.value.trim() })}
+          />
+        </p>
+        <p>
+          <input
+            type="password"
+            placeholder="Token"
+            value={settings.token}
+            onChange={(e) => setSettings({ ...settings, token: e.target.value.trim() })}
+          />
+        </p>
+        <button
+          className="btn primary"
+          disabled={!settings.workerUrl || !settings.token}
+          onClick={() => {
+            saveAiSettings(settings)
+            setEditing(false)
+          }}
+        >
+          Salvar
+        </button>
+      </>
+    )
+  }
+
+  return (
+    <>
+      <form
+        className="row"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (query.trim() && !loading) void run()
+        }}
+      >
+        <input
+          type="search"
+          placeholder="Ex.: Moana - Saber Quem Sou (refrão)"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          style={{ flex: 1, minWidth: 0 }}
+        />
+        <button className="btn primary" disabled={!query.trim() || loading}>
+          {loading ? 'Buscando…' : 'Buscar'}
+        </button>
+      </form>
+      {loading && <p className="hint">Procurando a melodia na internet… pode levar até um minuto.</p>}
+      {error && <p className="warn">{error}</p>}
+      {result && (
+        <div>
+          <p>
+            <strong>{result.title}</strong>{' '}
+            <span className={result.confidence === 'baixa' ? 'warn' : 'hint'}>confiança {result.confidence}</span>
+          </p>
+          {result.comment && <p className="hint">{result.comment}</p>}
+          {result.sourceUrl && (
+            <p className="hint">
+              Fonte:{' '}
+              <a href={result.sourceUrl} target="_blank" rel="noreferrer">
+                {result.sourceName ?? result.sourceUrl}
+              </a>
+            </p>
+          )}
+          <pre className="hint" style={{ whiteSpace: 'pre-wrap' }}>
+            {result.notes}
+          </pre>
+          <button className="btn primary" onClick={() => onResult(result)}>
+            Usar estas notas
+          </button>
+        </div>
+      )}
+      <p className="hint">
+        Confira ouvindo no ▶ antes de treinar: a IA pode errar algumas notas.{' '}
+        <button className="btn" style={{ minHeight: 0, padding: '2px 8px' }} onClick={() => setEditing(true)}>
+          Configurar
+        </button>
+      </p>
+    </>
   )
 }

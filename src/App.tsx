@@ -25,7 +25,7 @@ export function App() {
       source: data.source,
       items: data.items,
       transpose: bestTranspose(data.items),
-      bpm: 100,
+      bpm: data.bpm ?? 100,
       createdAt: now,
       updatedAt: now,
     }
