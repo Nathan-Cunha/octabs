@@ -1,0 +1,308 @@
+:root {
+  --bg: #faf7f0;
+  --surface: #ffffff;
+  --ink: #1d2230;
+  --muted: #6b7080;
+  --line: #d9d4c7;
+  --accent: #2f6fdb;
+  --accent-ink: #ffffff;
+  --current: #ffe58a;
+  --danger: #c9372c;
+  --hole-closed: #111111;
+  --hole-open: #ffffff;
+  --body-fill: #ffffff;
+  --body-stroke: #1d2230;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171f;
+    --surface: #1d212c;
+    --ink: #eceae4;
+    --muted: #9aa0ae;
+    --line: #333949;
+    --accent: #6ea0ff;
+    --accent-ink: #0b1020;
+    --current: #5c4d14;
+    --danger: #ff7a6e;
+    --hole-closed: #eceae4;
+    --hole-open: #1d212c;
+    --body-fill: #1d212c;
+    --body-stroke: #cfccc4;
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: max(12px, env(safe-area-inset-top)) 16px 96px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.topbar h1 {
+  font-size: 1.25rem;
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 8px 12px;
+  min-height: 40px;
+  cursor: pointer;
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.btn.danger {
+  color: var(--danger);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.tabs button {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  border-bottom: 2px solid transparent;
+  padding: 8px 4px;
+  color: var(--muted);
+}
+
+.tabs button[aria-selected='true'] {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+textarea,
+input[type='text'],
+input[type='search'],
+input[type='password'],
+input[type='url'] {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--bg);
+}
+
+textarea {
+  min-height: 140px;
+  font-family: ui-monospace, 'Cascadia Mono', Menlo, monospace;
+  font-size: 0.95rem;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.warn {
+  color: var(--danger);
+  font-size: 0.9rem;
+}
+
+/* Tablatura */
+.tab-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.phrase {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 4px 6px;
+}
+
+.ocarina {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border-radius: 10px;
+  padding: 2px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ocarina svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.ocarina figcaption {
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.1;
+}
+
+.ocarina.is-current {
+  background: var(--current);
+}
+
+.ocarina.is-out figcaption {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.ocarina-body {
+  fill: var(--body-fill);
+  stroke: var(--body-stroke);
+  stroke-width: 1.6;
+}
+
+.ocarina.is-out .ocarina-body {
+  stroke: var(--danger);
+  stroke-dasharray: 4 3;
+}
+
+.hole {
+  stroke: var(--body-stroke);
+  stroke-width: 1;
+}
+
+.hole.closed {
+  fill: var(--hole-closed);
+}
+
+.hole.open {
+  fill: var(--hole-open);
+}
+
+.ocarina-missing {
+  font-size: 30px;
+  fill: var(--danger);
+}
+
+.rest {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 1.4rem;
+}
+
+/* Player fixo embaixo */
+.player {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  padding: 8px 16px max(8px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.player input[type='range'] {
+  width: 120px;
+}
+
+/* Biblioteca */
+.song-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.song-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.song-list li button.title {
+  flex: 1;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 4px 0;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.song-list .meta {
+  display: block;
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 24px 8px;
+}
