@@ -94,7 +94,9 @@ function toSearchError(e: unknown): Error {
 
 export async function searchMelody(query: string, env: SearchEnv): Promise<SearchResult> {
   const model = env.MODEL || 'claude-opus-5'
-  const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 1, timeout: 240_000 })
+  // Sem novas tentativas automáticas: uma busca que falha no meio já foi cobrada,
+  // e repetir sozinho dobraria o gasto.
+  const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 0, timeout: 300_000 })
   const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: 'user', content: `Música: ${query}` }]
   // Fallback automático em caso de recusa só existe para os modelos da linha Opus 5/Fable.
   const fallback = /^claude-(opus-5|fable-5)/.test(model)
@@ -104,14 +106,18 @@ export async function searchMelody(query: string, env: SearchEnv): Promise<Searc
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     let response: Anthropic.Beta.BetaMessage
     try {
-      response = await client.beta.messages.create({
-        model,
-        max_tokens: 16000,
-        system: SYSTEM_PROMPT,
-        tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }, SUBMIT_TOOL],
-        messages,
-        ...fallback,
-      })
+      // Streaming: uma rodada com buscas na web pode passar de 100 s, e uma chamada sem
+      // streaming fica muda esse tempo todo e é derrubada (erro 524), mesmo já cobrada.
+      response = await client.beta.messages
+        .stream({
+          model,
+          max_tokens: 16000,
+          system: SYSTEM_PROMPT,
+          tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }, SUBMIT_TOOL],
+          messages,
+          ...fallback,
+        })
+        .finalMessage()
     } catch (e) {
       throw toSearchError(e)
     }
