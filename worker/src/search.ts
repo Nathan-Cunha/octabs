@@ -28,10 +28,12 @@ Converta as notas para este formato, tokens separados por espaço:
 - letra da nota em inglês, acidente opcional (# ou b) e SEMPRE a oitava, com C4 = dó central (ex.: C5 D#5 Bb4)
 - duração opcional depois de dois-pontos, em tempos, onde 1 = semínima (ex.: E5:2, G5:0.5); sem duração vale 1
 - pausa: - (ex.: -:1)
-- | separa frases (a cada frase da letra ou a cada 1–2 compassos)
+- | separa frases musicais (a cada 1–2 compassos)
 Se a fonte usar o estilo noobnotes (ponto antes = oitava abaixo, apóstrofo depois = oitava acima), converta para oitavas explícitas. Não precisa transpor: o app ajusta o tom sozinho.
 
-Quando terminar, chame a ferramenta submit_melody uma única vez com o resultado. Escreva title e comment em português.`
+Nunca escreva a letra da música, nem trechos dela, em nenhum lugar da resposta (nem no texto, nem em title ou comment): o app só precisa dos nomes das notas.
+
+Seja econômico: faça poucas buscas e, assim que tiver uma transcrição confiável, chame a ferramenta submit_melody uma única vez com o resultado. Escreva title e comment em português.`
 
 const SUBMIT_TOOL = {
   name: 'submit_melody',
@@ -53,7 +55,25 @@ const SUBMIT_TOOL = {
   },
 }
 
-const MAX_TURNS = 5
+// Cada rodada reenvia o histórico (com os resultados da busca); poucas rodadas limitam o gasto.
+const MAX_TURNS = 3
+
+/** Traduz erros da API em mensagens úteis para o app (sem expor detalhes internos). */
+function toSearchError(e: unknown): Error {
+  console.error('anthropic api error', e)
+  if (e instanceof Anthropic.AuthenticationError) return new SearchError('Chave da API inválida no Worker.')
+  if (e instanceof Anthropic.RateLimitError) return new SearchError('Limite da API atingido. Tente em alguns minutos.')
+  if (e instanceof Anthropic.BadRequestError) {
+    const apiMessage = (e.error as { error?: { message?: string } } | undefined)?.error?.message
+    return new SearchError(
+      `A API recusou esta busca${apiMessage ? ` (${apiMessage})` : ''}. Tente outra música, ou use as abas Notas ou MIDI.`,
+    )
+  }
+  if (e instanceof Anthropic.APIError && (e.status ?? 0) >= 500) {
+    return new SearchError('O serviço da API está instável agora. Tente de novo em instantes.')
+  }
+  return e instanceof Error ? e : new Error(String(e))
+}
 
 export async function searchMelody(query: string, env: SearchEnv): Promise<SearchResult> {
   const model = env.MODEL || 'claude-opus-5'
@@ -65,14 +85,19 @@ export async function searchMelody(query: string, env: SearchEnv): Promise<Searc
     : {}
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
-    const response = await client.beta.messages.create({
-      model,
-      max_tokens: 16000,
-      system: SYSTEM_PROMPT,
-      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 5 }, SUBMIT_TOOL],
-      messages,
-      ...fallback,
-    })
+    let response: Anthropic.Beta.BetaMessage
+    try {
+      response = await client.beta.messages.create({
+        model,
+        max_tokens: 16000,
+        system: SYSTEM_PROMPT,
+        tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }, SUBMIT_TOOL],
+        messages,
+        ...fallback,
+      })
+    } catch (e) {
+      throw toSearchError(e)
+    }
 
     for (const block of response.content) {
       if (block.type === 'tool_use' && block.name === 'submit_melody') return normalize(block.input)
