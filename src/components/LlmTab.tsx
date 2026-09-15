@@ -11,7 +11,7 @@ import {
   type LlmSettings,
 } from '../llm/localLlm'
 
-export function LlmTab({ onResult }: { onResult(r: ConvertResult): void }) {
+export function LlmTab({ onResult }: { onResult(r: ConvertResult, source?: string): void }) {
   const [settings, setSettings] = useState<LlmSettings>(loadLlmSettings)
   const [raw, setRaw] = useState('')
   const [link, setLink] = useState('')
@@ -57,7 +57,7 @@ export function LlmTab({ onResult }: { onResult(r: ConvertResult): void }) {
       const text = await fetchPageText(link, ctrl.signal)
       // Página já em notas (ex.: noobnotes): vai direto para a aba Notas, sem IA.
       const direct = tryDirectParse(text)
-      if (direct) onResult(direct)
+      if (direct) onResult(direct, link.trim())
       else setRaw(text)
     } catch (e) {
       if ((e as Error).name !== 'AbortError') setError((e as Error).message)
@@ -70,7 +70,8 @@ export function LlmTab({ onResult }: { onResult(r: ConvertResult): void }) {
     const ctrl = start()
     setBusy('convert')
     try {
-      onResult(await convertWithLlm({ text: raw, images: image ? [image.base64] : [] }, settings, ctrl.signal))
+      const result = await convertWithLlm({ text: raw, images: image ? [image.base64] : [] }, settings, ctrl.signal)
+      onResult(result, image ? 'IA local (print)' : 'IA local')
     } catch (e) {
       if ((e as Error).name !== 'AbortError') setError((e as Error).message)
     } finally {

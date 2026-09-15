@@ -29,10 +29,10 @@ export function SongInput({ onCreate, onCancel }: Props) {
   const parsed = useMemo(() => parseText(text), [text])
   const noteCount = parsed.items.filter(isNote).length
 
-  function fillFromLlm(r: ConvertResult) {
+  function fillFromLlm(r: ConvertResult, from?: string) {
     if (r.title) setTitle(r.title)
     setText(r.notes)
-    setSource('IA local')
+    setSource(from ?? 'IA local')
     setAiComment(r.comment)
     setTab('paste')
   }
@@ -102,8 +102,19 @@ export function SongInput({ onCreate, onCancel }: Props) {
                 <li>Tem um link, um print ou um texto bagunçado? Use a aba IA local.</li>
               </ul>
             </details>
-            {source && <p className="hint">Fonte: {source}</p>}
-            {aiComment && <p className="hint">Observação da IA: {aiComment}</p>}
+            {source && (
+              <p className="hint">
+                Fonte:{' '}
+                {source.startsWith('http') ? (
+                  <a href={source} target="_blank" rel="noreferrer">
+                    {source}
+                  </a>
+                ) : (
+                  source
+                )}
+              </p>
+            )}
+            {aiComment && <p className="hint">Observação: {aiComment}</p>}
             <p className="hint">
               {noteCount} nota{noteCount === 1 ? '' : 's'}
               {parsed.unknown.length > 0 && (
