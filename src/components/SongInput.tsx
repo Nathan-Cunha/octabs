@@ -1,16 +1,17 @@
 import { useMemo, useRef, useState } from 'react'
+import {
+  convertWithLlm,
+  listModels,
+  loadLlmSettings,
+  saveLlmSettings,
+  type ConvertResult,
+  type LlmSettings,
+} from '../llm/localLlm'
 import { readMidi, trackBarRange, trackToMelody, type MidiFileInfo } from '../music/parseMidi'
 import { parseText } from '../music/parseText'
 import { isNote, type MelodyItem } from '../music/types'
-import {
-  loadAiSettings,
-  saveAiSettings,
-  searchMelody,
-  type AiSettings,
-  type MelodySearchResult,
-} from '../search/aiSearch'
 
-type Tab = 'ai' | 'paste' | 'midi'
+type Tab = 'paste' | 'llm' | 'midi'
 
 export interface NewSongData {
   title: string
@@ -25,20 +26,18 @@ interface Props {
 }
 
 export function SongInput({ onCreate, onCancel }: Props) {
-  const [tab, setTab] = useState<Tab>(() => (loadAiSettings().workerUrl ? 'ai' : 'paste'))
+  const [tab, setTab] = useState<Tab>('paste')
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
   const [source, setSource] = useState<string | undefined>()
-  const [bpm, setBpm] = useState<number | undefined>()
 
   const parsed = useMemo(() => parseText(text), [text])
   const noteCount = parsed.items.filter(isNote).length
 
-  function fillFromSearch(r: MelodySearchResult) {
-    setTitle(r.title)
+  function fillFromLlm(r: ConvertResult) {
+    if (r.title) setTitle(r.title)
     setText(r.notes)
-    setSource(r.sourceUrl ?? r.sourceName ?? 'busca')
-    setBpm(r.bpm ?? undefined)
+    setSource('IA local')
     setTab('paste')
   }
 
@@ -53,18 +52,18 @@ export function SongInput({ onCreate, onCancel }: Props) {
 
       <div className="card">
         <div className="tabs" role="tablist">
-          <button role="tab" aria-selected={tab === 'ai'} onClick={() => setTab('ai')}>
-            Buscar
-          </button>
           <button role="tab" aria-selected={tab === 'paste'} onClick={() => setTab('paste')}>
             Notas
+          </button>
+          <button role="tab" aria-selected={tab === 'llm'} onClick={() => setTab('llm')}>
+            IA local
           </button>
           <button role="tab" aria-selected={tab === 'midi'} onClick={() => setTab('midi')}>
             MIDI
           </button>
         </div>
 
-        {tab === 'ai' && <AiTab onResult={fillFromSearch} />}
+        {tab === 'llm' && <LlmTab onResult={fillFromLlm} />}
 
         {tab === 'paste' && (
           <>
@@ -104,20 +103,10 @@ export function SongInput({ onCreate, onCancel }: Props) {
                   Nova frase: <code>|</code> ou quebra de linha
                 </li>
                 <li>O tom é ajustado automaticamente para caber na ocarina.</li>
+                <li>Texto bagunçado (com letra, acordes etc.)? Use a aba IA local.</li>
               </ul>
             </details>
-            {source && (
-              <p className="hint">
-                Fonte:{' '}
-                {source.startsWith('http') ? (
-                  <a href={source} target="_blank" rel="noreferrer">
-                    {source}
-                  </a>
-                ) : (
-                  source
-                )}
-              </p>
-            )}
+            {source && <p className="hint">Fonte: {source}</p>}
             <p className="hint">
               {noteCount} nota{noteCount === 1 ? '' : 's'}
               {parsed.unknown.length > 0 && (
@@ -127,9 +116,7 @@ export function SongInput({ onCreate, onCancel }: Props) {
             <button
               className="btn primary"
               disabled={noteCount === 0}
-              onClick={() =>
-                onCreate({ title: title.trim() || 'Sem título', items: parsed.items, source: source ?? 'colado', bpm })
-              }
+              onClick={() => onCreate({ title: title.trim() || 'Sem título', items: parsed.items, source: source ?? 'colado' })}
             >
               Gerar tablatura
             </button>
@@ -264,13 +251,12 @@ function MidiTab({ onCreate }: { onCreate(data: NewSongData): void }) {
   )
 }
 
-function AiTab({ onResult }: { onResult(r: MelodySearchResult): void }) {
-  const [settings, setSettings] = useState<AiSettings>(loadAiSettings)
-  const [editing, setEditing] = useState(!settings.workerUrl)
-  const [query, setQuery] = useState('')
+function LlmTab({ onResult }: { onResult(r: ConvertResult): void }) {
+  const [settings, setSettings] = useState<LlmSettings>(loadLlmSettings)
+  const [raw, setRaw] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [result, setResult] = useState<MelodySearchResult | null>(null)
+  const [status, setStatus] = useState('')
   const abort = useRef<AbortController | null>(null)
 
   async function run() {
@@ -279,9 +265,8 @@ function AiTab({ onResult }: { onResult(r: MelodySearchResult): void }) {
     abort.current = ctrl
     setLoading(true)
     setError('')
-    setResult(null)
     try {
-      setResult(await searchMelody(query, settings, ctrl.signal))
+      onResult(await convertWithLlm(raw, settings, ctrl.signal))
     } catch (e) {
       if ((e as Error).name !== 'AbortError') setError((e as Error).message)
     } finally {
@@ -289,93 +274,77 @@ function AiTab({ onResult }: { onResult(r: MelodySearchResult): void }) {
     }
   }
 
-  if (editing) {
-    return (
-      <>
-        <p className="hint">
-          Configure uma vez o endereço do seu Worker da busca e o token (ficam salvos só neste aparelho).
-        </p>
-        <p>
-          <input
-            type="url"
-            placeholder="https://octabs-search.SEU-USUARIO.workers.dev"
-            value={settings.workerUrl}
-            onChange={(e) => setSettings({ ...settings, workerUrl: e.target.value.trim() })}
-          />
-        </p>
-        <p>
-          <input
-            type="password"
-            placeholder="Token"
-            value={settings.token}
-            onChange={(e) => setSettings({ ...settings, token: e.target.value.trim() })}
-          />
-        </p>
-        <button
-          className="btn primary"
-          disabled={!settings.workerUrl || !settings.token}
-          onClick={() => {
-            saveAiSettings(settings)
-            setEditing(false)
-          }}
-        >
-          Salvar
-        </button>
-      </>
-    )
+  async function testConnection() {
+    saveLlmSettings(settings)
+    setStatus('Testando…')
+    try {
+      const models = await listModels(settings)
+      if (models.length === 0) setStatus('Conectado, mas nenhum modelo foi baixado ainda.')
+      else if (!models.includes(settings.model)) setStatus(`Conectado. "${settings.model}" não está instalado; há: ${models.join(', ')}`)
+      else setStatus(`Conectado e pronto (${settings.model}).`)
+    } catch (e) {
+      setStatus((e as Error).message)
+    }
   }
 
   return (
     <>
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (query.trim() && !loading) void run()
-        }}
-      >
-        <input
-          type="search"
-          placeholder="Ex.: Moana - Saber Quem Sou (refrão)"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          style={{ flex: 1, minWidth: 0 }}
-        />
-        <button className="btn primary" disabled={!query.trim() || loading}>
-          {loading ? 'Buscando…' : 'Buscar'}
+      <p className="hint">
+        Cole o texto de uma página com as notas da música (site de notas, tablatura, cifra com notas). A IA roda no
+        seu PC, de graça, e só organiza as notas que estiverem no texto — letra e acordes são ignorados.
+      </p>
+      <textarea
+        placeholder={'Cole aqui o texto da página…'}
+        value={raw}
+        onChange={(e) => setRaw(e.target.value)}
+        spellCheck={false}
+      />
+      <div className="row">
+        <button className="btn primary" disabled={!raw.trim() || loading} onClick={() => void run()}>
+          {loading ? 'Convertendo…' : 'Converter'}
         </button>
-      </form>
-      {loading && <p className="hint">Procurando a melodia na internet… pode levar até um minuto.</p>}
+        {loading && (
+          <button className="btn" onClick={() => abort.current?.abort()}>
+            Cancelar
+          </button>
+        )}
+      </div>
+      {loading && <p className="hint">Na primeira vez o PC leva alguns segundos para carregar o modelo.</p>}
       {error && <p className="warn">{error}</p>}
-      {result && (
-        <div>
-          <p>
-            <strong>{result.title}</strong>{' '}
-            <span className={result.confidence === 'baixa' ? 'warn' : 'hint'}>confiança {result.confidence}</span>
-          </p>
-          {result.comment && <p className="hint">{result.comment}</p>}
-          {result.sourceUrl && (
-            <p className="hint">
-              Fonte:{' '}
-              <a href={result.sourceUrl} target="_blank" rel="noreferrer">
-                {result.sourceName ?? result.sourceUrl}
-              </a>
-            </p>
-          )}
-          <pre className="hint" style={{ whiteSpace: 'pre-wrap' }}>
-            {result.notes}
-          </pre>
-          <button className="btn primary" onClick={() => onResult(result)}>
-            Usar estas notas
+
+      <details className="hint">
+        <summary>Conexão com o Ollama</summary>
+        <p>
+          <label>
+            Endereço
+            <input
+              type="url"
+              value={settings.baseUrl}
+              onChange={(e) => setSettings({ ...settings, baseUrl: e.target.value.trim() })}
+            />
+          </label>
+        </p>
+        <p>
+          <label>
+            Modelo
+            <input
+              type="text"
+              value={settings.model}
+              onChange={(e) => setSettings({ ...settings, model: e.target.value.trim() })}
+            />
+          </label>
+        </p>
+        <div className="row">
+          <button className="btn" onClick={() => void testConnection()}>
+            Salvar e testar
           </button>
         </div>
-      )}
-      <p className="hint">
-        Confira ouvindo no ▶ antes de treinar: a IA pode errar algumas notas.{' '}
-        <button className="btn" style={{ minHeight: 0, padding: '2px 8px' }} onClick={() => setEditing(true)}>
-          Configurar
-        </button>
-      </p>
+        {status && <p>{status}</p>}
+        <p>
+          No PC use <code>http://localhost:11434</code>. No celular, o PC precisa estar ligado e acessível pelo
+          Tailscale com o endereço <code>https://</code> do PC.
+        </p>
+      </details>
     </>
   )
 }
