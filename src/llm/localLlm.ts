@@ -1,5 +1,8 @@
 // Conversão de texto, print ou link em notas usando uma LLM local (Ollama no PC). Grátis.
 
+import { NOOBNOTES_TOKEN, parseText } from '../music/parseText'
+import { isNote } from '../music/types'
+
 export interface LlmSettings {
   baseUrl: string
   model: string
@@ -45,10 +48,10 @@ O usuário envia o texto de uma página (sites de notas em letras, tablaturas, p
 
 Regras:
 - Extraia só as notas da melodia, na ordem em que aparecem. Ignore letra, acordes (ex.: Am, G7, C/E), números de compasso e comentários.
-- Não invente, não complete e não corrija notas: use apenas as que estão no conteúdo. Em imagens, leia com atenção notas repetidas em sequência e não pule nenhuma.
+- Não invente, não complete, não repita e não corrija notas: use apenas as que estão no conteúdo, uma vez cada. Em imagens, leia com atenção notas repetidas em sequência e não pule nenhuma.
 - Campo notes: tokens separados por espaço, cada um com a letra da nota em inglês (C D E F G A B), acidente opcional (# ou b) e a oitava, onde C4 é o dó central. Exemplo: C5 D#5 Bb4.
 - Solfejo vira letras: Dó=C, Ré=D, Mi=E, Fá=F, Sol=G, Lá=A, Si=B.
-- Estilo noobnotes: ponto antes da nota = uma oitava abaixo (.G = G4); apóstrofo ou asterisco depois = uma oitava acima (E' = E6); sem marca = oitava 5.
+- Estilo noobnotes: ^ antes da nota = uma oitava acima (^C = C6); ponto antes = uma oitava abaixo (.G = G4); sem marca = oitava 5; hífen depois = nota longa (B- = B5:2); notas podem vir grudadas (^C^C^C = C6 C6 C6). Linhas que começam com * são a legenda do site: ignore.
 - Partitura em pauta (imagem): leia as notas pela posição na pauta com clave de sol; se não conseguir ler com segurança, diga isso em comment.
 - Se o conteúdo não indicar oitava, use a oitava 5.
 - Coloque | onde o original quebra a linha ou a frase da melodia.
@@ -122,7 +125,8 @@ export async function convertWithLlm(input: ConvertInput, s: LlmSettings, signal
       stream: false,
       think: false,
       format: SCHEMA,
-      options: { temperature: 0, num_ctx: 8192 },
+      // Imagens precisam de mais contexto. num_predict evita que a IA fique repetindo notas sem parar.
+      options: { temperature: 0, num_ctx: images.length > 0 ? 8192 : 4096, num_predict: 1024 },
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: EXAMPLE_INPUT },
@@ -144,7 +148,7 @@ export function parseResult(content: string): ConvertResult {
   try {
     o = JSON.parse(content) as Record<string, unknown>
   } catch {
-    throw new Error('A IA não devolveu um resultado válido. Tente de novo.')
+    throw new Error('A IA não devolveu um resultado válido (talvez a resposta tenha ficado longa demais). Tente de novo.')
   }
   const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null)
   const notes = str(o.notes, 4000)
@@ -160,17 +164,40 @@ const READER = 'https://r.jina.ai/'
 const NOTE_TOKEN =
   /^\.*([A-Ga-g]|d[oó]|r[eé]|mi|f[aá]|sol?|l[aá]|si)(#|b|♯|♭)?-?\d?['’*^]*(:\d+(?:[.,]\d+)?)?[,;]*$/i
 
+const isNoteToken = (t: string) => NOTE_TOKEN.test(t) || NOOBNOTES_TOKEN.test(t)
+
 /** Parte do texto da página que parece melodia: linhas em que a maioria das palavras são notas. */
 export function extractMelodyLines(page: string, max = MAX_INPUT): string {
   const lines = page.replace(/\r/g, '').split('\n')
   const title = lines.find((l) => l.startsWith('Title:'))
   const kept = lines.filter((line) => {
-    const tokens = line.replace(/[|()[\]]/g, ' ').split(/\s+/).filter(Boolean)
-    const notes = tokens.filter((t) => NOTE_TOKEN.test(t)).length
-    return notes >= 2 && notes / tokens.length >= 0.6
+    if (/^\s*[*•]/.test(line)) return false // legendas e listas do site
+    const tokens = line
+      .replace(/[|()[\]]/g, ' ')
+      .split(/\s+/)
+      .filter((t) => t && t !== '-')
+    const notes = tokens.filter(isNoteToken).length
+    return notes >= 3 && notes / tokens.length >= 0.6
   })
   const text = kept.length > 0 ? [title, ...kept].filter(Boolean).join('\n') : page
   return text.slice(0, max)
+}
+
+/**
+ * Se o texto já está num formato de notas que o app entende (ex.: noobnotes), usa direto,
+ * sem IA: é instantâneo e não erra.
+ */
+export function tryDirectParse(text: string): ConvertResult | null {
+  const lines = text.split('\n')
+  const titleLine = lines.find((l) => l.startsWith('Title:'))
+  const body = lines.filter((l) => !l.startsWith('Title:')).join('\n').trim()
+  const { items, unknown } = parseText(body)
+  const notes = items.filter(isNote).length
+  if (notes < 8 || unknown.length > Math.max(1, Math.floor(notes * 0.05))) return null
+  const title = titleLine
+    ? titleLine.slice('Title:'.length).replace(/\s*[-–|]\s*music notes for newbies\s*$/i, '').trim() || null
+    : null
+  return { title, notes: body, comment: 'Notas lidas direto da página, sem IA.' }
 }
 
 export async function fetchPageText(url: string, signal?: AbortSignal): Promise<string> {

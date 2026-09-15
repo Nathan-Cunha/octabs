@@ -18,6 +18,14 @@ describe('parseText', () => {
     expect(midis(".G C D E'")).toEqual([67, 72, 74, 88])
   })
 
+  it('noobnotes de verdade: ^ antes, notas grudadas e hífen de nota longa', () => {
+    const { items, unknown } = parseText('(D^) B - B B-^D .G\n^C^C^C B B')
+    expect(unknown).toEqual([])
+    expect(items.map((i) => (i.kind === 'break' ? '|' : `${i.midi ?? 'r'}:${i.dur}`))).toEqual([
+      '86:1', '83:1', 'r:1', '83:1', '83:2', '86:1', '67:1', '|', '84:1', '84:1', '84:1', '83:1', '83:1',
+    ])
+  })
+
   it('solfejo pt-BR', () => {
     expect(midis('Dó Ré Mi Fá Sol Lá Si')).toEqual([72, 74, 76, 77, 79, 81, 83])
     expect(midis('Sol4 Lá4 Fá#5 Sib5')).toEqual([67, 69, 78, 82])

@@ -1,4 +1,4 @@
-import { useRef, useState, type ClipboardEvent } from 'react'
+import { useEffect, useRef, useState, type ClipboardEvent } from 'react'
 import { prepareImage, type PreparedImage } from '../llm/image'
 import {
   convertWithLlm,
@@ -6,6 +6,7 @@ import {
   listModels,
   loadLlmSettings,
   saveLlmSettings,
+  tryDirectParse,
   type ConvertResult,
   type LlmSettings,
 } from '../llm/localLlm'
@@ -20,6 +21,9 @@ export function LlmTab({ onResult }: { onResult(r: ConvertResult): void }) {
   const [status, setStatus] = useState('')
   const abort = useRef<AbortController | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // Ao sair da aba, cancela o pedido para o PC não continuar trabalhando à toa.
+  useEffect(() => () => abort.current?.abort(), [])
 
   function start() {
     abort.current?.abort()
@@ -50,7 +54,11 @@ export function LlmTab({ onResult }: { onResult(r: ConvertResult): void }) {
     const ctrl = start()
     setBusy('link')
     try {
-      setRaw(await fetchPageText(link, ctrl.signal))
+      const text = await fetchPageText(link, ctrl.signal)
+      // Página já em notas (ex.: noobnotes): vai direto para a aba Notas, sem IA.
+      const direct = tryDirectParse(text)
+      if (direct) onResult(direct)
+      else setRaw(text)
     } catch (e) {
       if ((e as Error).name !== 'AbortError') setError((e as Error).message)
     } finally {

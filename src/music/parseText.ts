@@ -3,7 +3,9 @@ import type { MelodyItem } from './types'
 // Aceita, misturados:
 //   letras com oitava:     C4 D#4 Eb5 F5
 //   letras sem oitava:     C D E F G   (oitava "atual", começando na 5)
-//   estilo noobnotes:      .G  C  D  E'  (ponto antes = oitava abaixo, apóstrofo depois = acima)
+//   estilo noobnotes:      ^C  .G  B-  ^C^C^C  (^ antes = oitava acima, ponto antes = abaixo,
+//                          hífen depois = nota longa, notas podem vir grudadas)
+//   apóstrofo depois:      E'  (uma oitava acima)
 //   solfejo pt-BR:         Dó Ré Mi Fá Sol Lá Si  (com # ou b, oitava opcional: Sol4)
 //   duração opcional:      C4:2  (2 tempos)   E:0.5
 //   pausa:                 -  ou  _  ou  R
@@ -22,6 +24,10 @@ const SOLFEGE: [RegExp, number][] = [
 ]
 
 const DEFAULT_OCTAVE = 5
+
+/** Uma ou mais notas maiúsculas no estilo noobnotes, possivelmente grudadas: ^C^C, B-^D, .G */
+export const NOOBNOTES_TOKEN = /^(?:[.^]*[A-G](?:#|b)?-*)+$/
+const NOOBNOTES_NOTE = /([.^]*)([A-G])(#|b)?(-*)/g
 
 export interface ParseResult {
   items: MelodyItem[]
@@ -44,16 +50,20 @@ export function parseText(text: string): ParseResult {
       pushBreak()
       continue
     }
-    // Separa "|" como token próprio; vírgulas e hífens entre notas viram espaço.
+    // Separa "|" como token próprio; vírgulas e parênteses viram espaço.
     const tokens = line
       .replace(/\|/g, ' | ')
-      .replace(/,/g, ' ')
+      .replace(/[,()]/g, ' ')
       .split(/\s+/)
       .filter(Boolean)
 
     for (const token of tokens) {
       if (token === '|') {
         pushBreak()
+        continue
+      }
+      if (NOOBNOTES_TOKEN.test(token)) {
+        items.push(...parseNoobnotes(token))
         continue
       }
       const parsed = parseToken(token)
@@ -65,6 +75,19 @@ export function parseText(text: string): ParseResult {
 
   if (items[items.length - 1]?.kind === 'break') items.pop()
   return { items, unknown }
+}
+
+function parseNoobnotes(token: string): MelodyItem[] {
+  const notes: MelodyItem[] = []
+  for (const m of token.matchAll(NOOBNOTES_NOTE)) {
+    const [, marks, letter, acc, dashes] = m
+    const shift = (marks.match(/\^/g)?.length ?? 0) - (marks.match(/\./g)?.length ?? 0)
+    let semitone = LETTER_SEMITONE[letter.toLowerCase()]
+    if (acc === '#') semitone += 1
+    if (acc === 'b') semitone -= 1
+    notes.push({ kind: 'note', midi: (DEFAULT_OCTAVE + 1 + shift) * 12 + semitone, dur: 1 + dashes.length })
+  }
+  return notes
 }
 
 function parseToken(raw: string): MelodyItem | null {
@@ -79,7 +102,7 @@ function parseToken(raw: string): MelodyItem | null {
 
   if (/^(-|_|r|rest|pausa)$/i.test(token)) return { kind: 'note', midi: null, dur }
 
-  // Pontos antes (oitava abaixo) e apóstrofos/aspas depois (oitava acima), estilo noobnotes.
+  // Pontos antes (oitava abaixo) e apóstrofos/aspas depois (oitava acima).
   let octaveShift = 0
   const dots = token.match(/^\.+/)
   if (dots) {
