@@ -1,15 +1,9 @@
 import { useMemo, useRef, useState } from 'react'
-import {
-  convertWithLlm,
-  listModels,
-  loadLlmSettings,
-  saveLlmSettings,
-  type ConvertResult,
-  type LlmSettings,
-} from '../llm/localLlm'
+import type { ConvertResult } from '../llm/localLlm'
 import { readMidi, trackBarRange, trackToMelody, type MidiFileInfo } from '../music/parseMidi'
 import { parseText } from '../music/parseText'
 import { isNote, type MelodyItem } from '../music/types'
+import { LlmTab } from './LlmTab'
 
 type Tab = 'paste' | 'llm' | 'midi'
 
@@ -30,6 +24,7 @@ export function SongInput({ onCreate, onCancel }: Props) {
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
   const [source, setSource] = useState<string | undefined>()
+  const [aiComment, setAiComment] = useState<string | null>(null)
 
   const parsed = useMemo(() => parseText(text), [text])
   const noteCount = parsed.items.filter(isNote).length
@@ -38,6 +33,7 @@ export function SongInput({ onCreate, onCancel }: Props) {
     if (r.title) setTitle(r.title)
     setText(r.notes)
     setSource('IA local')
+    setAiComment(r.comment)
     setTab('paste')
   }
 
@@ -103,10 +99,11 @@ export function SongInput({ onCreate, onCancel }: Props) {
                   Nova frase: <code>|</code> ou quebra de linha
                 </li>
                 <li>O tom é ajustado automaticamente para caber na ocarina.</li>
-                <li>Texto bagunçado (com letra, acordes etc.)? Use a aba IA local.</li>
+                <li>Tem um link, um print ou um texto bagunçado? Use a aba IA local.</li>
               </ul>
             </details>
             {source && <p className="hint">Fonte: {source}</p>}
+            {aiComment && <p className="hint">Observação da IA: {aiComment}</p>}
             <p className="hint">
               {noteCount} nota{noteCount === 1 ? '' : 's'}
               {parsed.unknown.length > 0 && (
@@ -247,104 +244,6 @@ function MidiTab({ onCreate }: { onCreate(data: NewSongData): void }) {
           </button>
         </>
       )}
-    </>
-  )
-}
-
-function LlmTab({ onResult }: { onResult(r: ConvertResult): void }) {
-  const [settings, setSettings] = useState<LlmSettings>(loadLlmSettings)
-  const [raw, setRaw] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [status, setStatus] = useState('')
-  const abort = useRef<AbortController | null>(null)
-
-  async function run() {
-    abort.current?.abort()
-    const ctrl = new AbortController()
-    abort.current = ctrl
-    setLoading(true)
-    setError('')
-    try {
-      onResult(await convertWithLlm(raw, settings, ctrl.signal))
-    } catch (e) {
-      if ((e as Error).name !== 'AbortError') setError((e as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function testConnection() {
-    saveLlmSettings(settings)
-    setStatus('Testando…')
-    try {
-      const models = await listModels(settings)
-      if (models.length === 0) setStatus('Conectado, mas nenhum modelo foi baixado ainda.')
-      else if (!models.includes(settings.model)) setStatus(`Conectado. "${settings.model}" não está instalado; há: ${models.join(', ')}`)
-      else setStatus(`Conectado e pronto (${settings.model}).`)
-    } catch (e) {
-      setStatus((e as Error).message)
-    }
-  }
-
-  return (
-    <>
-      <p className="hint">
-        Cole o texto de uma página com as notas da música (site de notas, tablatura, cifra com notas). A IA roda no
-        seu PC, de graça, e só organiza as notas que estiverem no texto — letra e acordes são ignorados.
-      </p>
-      <textarea
-        placeholder={'Cole aqui o texto da página…'}
-        value={raw}
-        onChange={(e) => setRaw(e.target.value)}
-        spellCheck={false}
-      />
-      <div className="row">
-        <button className="btn primary" disabled={!raw.trim() || loading} onClick={() => void run()}>
-          {loading ? 'Convertendo…' : 'Converter'}
-        </button>
-        {loading && (
-          <button className="btn" onClick={() => abort.current?.abort()}>
-            Cancelar
-          </button>
-        )}
-      </div>
-      {loading && <p className="hint">Na primeira vez o PC leva alguns segundos para carregar o modelo.</p>}
-      {error && <p className="warn">{error}</p>}
-
-      <details className="hint">
-        <summary>Conexão com o Ollama</summary>
-        <p>
-          <label>
-            Endereço
-            <input
-              type="url"
-              value={settings.baseUrl}
-              onChange={(e) => setSettings({ ...settings, baseUrl: e.target.value.trim() })}
-            />
-          </label>
-        </p>
-        <p>
-          <label>
-            Modelo
-            <input
-              type="text"
-              value={settings.model}
-              onChange={(e) => setSettings({ ...settings, model: e.target.value.trim() })}
-            />
-          </label>
-        </p>
-        <div className="row">
-          <button className="btn" onClick={() => void testConnection()}>
-            Salvar e testar
-          </button>
-        </div>
-        {status && <p>{status}</p>}
-        <p>
-          No PC use <code>http://localhost:11434</code>. No celular, o PC precisa estar ligado e acessível pelo
-          Tailscale com o endereço <code>https://</code> do PC.
-        </p>
-      </details>
     </>
   )
 }

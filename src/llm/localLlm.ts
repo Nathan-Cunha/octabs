@@ -1,4 +1,4 @@
-// Conversão de texto colado em notas usando uma LLM local (Ollama no PC). Grátis e offline.
+// Conversão de texto, print ou link em notas usando uma LLM local (Ollama no PC). Grátis.
 
 export interface LlmSettings {
   baseUrl: string
@@ -11,10 +11,16 @@ export interface ConvertResult {
   comment: string | null
 }
 
+export interface ConvertInput {
+  text?: string
+  /** Imagens em base64 (sem o prefixo data:). */
+  images?: string[]
+}
+
 export const DEFAULT_LLM_SETTINGS: LlmSettings = { baseUrl: 'http://localhost:11434', model: 'qwen3.5:9b' }
 
 const KEY = 'octabs:llm'
-const MAX_INPUT = 6000
+const MAX_INPUT = 12000
 
 export function loadLlmSettings(): LlmSettings {
   try {
@@ -34,20 +40,21 @@ export function saveLlmSettings(s: LlmSettings) {
   }
 }
 
-const SYSTEM_PROMPT = `Você converte textos com melodias em uma lista de notas para um app de ocarina.
-O usuário cola o texto de uma página (sites de notas em letras, tablaturas, partituras em texto). O texto pode misturar letra da música, acordes, títulos e instruções.
+const SYSTEM_PROMPT = `Você converte melodias em uma lista de notas para um app de ocarina.
+O usuário envia o texto de uma página (sites de notas em letras, tablaturas, partituras em texto) e/ou um print (imagem) com as notas. O conteúdo pode misturar letra da música, acordes, títulos e instruções.
 
 Regras:
 - Extraia só as notas da melodia, na ordem em que aparecem. Ignore letra, acordes (ex.: Am, G7, C/E), números de compasso e comentários.
-- Não invente, não complete e não corrija notas: use apenas as que estão no texto.
+- Não invente, não complete e não corrija notas: use apenas as que estão no conteúdo. Em imagens, leia com atenção notas repetidas em sequência e não pule nenhuma.
 - Campo notes: tokens separados por espaço, cada um com a letra da nota em inglês (C D E F G A B), acidente opcional (# ou b) e a oitava, onde C4 é o dó central. Exemplo: C5 D#5 Bb4.
 - Solfejo vira letras: Dó=C, Ré=D, Mi=E, Fá=F, Sol=G, Lá=A, Si=B.
 - Estilo noobnotes: ponto antes da nota = uma oitava abaixo (.G = G4); apóstrofo ou asterisco depois = uma oitava acima (E' = E6); sem marca = oitava 5.
-- Se o texto não indicar oitava, use a oitava 5.
+- Partitura em pauta (imagem): leia as notas pela posição na pauta com clave de sol; se não conseguir ler com segurança, diga isso em comment.
+- Se o conteúdo não indicar oitava, use a oitava 5.
 - Coloque | onde o original quebra a linha ou a frase da melodia.
-- Duração só se o texto indicar claramente (ex.: C5:2 para 2 tempos); senão omita.
-- title: nome da música se aparecer no texto, senão null. comment: observação curta em português, ou null.
-- Se não houver notas no texto, devolva notes vazio.`
+- Duração só se o conteúdo indicar claramente (ex.: C5:2 para 2 tempos); senão omita.
+- title: nome da música se aparecer, senão null. comment: observação curta em português, ou null.
+- Se não houver notas, devolva notes vazio.`
 
 const EXAMPLE_INPUT = `Brilha Brilha Estrelinha - notas para flauta
 
@@ -82,7 +89,7 @@ async function call(s: LlmSettings, path: string, init?: RequestInit): Promise<R
   } catch (e) {
     if ((e as Error).name === 'AbortError') throw e
     throw new Error(
-      `Não consegui conectar ao Ollama em ${base(s)}. Confira se ele está aberto no PC` +
+      `Não consegui conectar ao Ollama em ${base(s)}. Confira se o PC está ligado` +
         ' (e, no celular, se o Tailscale está ligado e o endereço é o https do PC).',
     )
   }
@@ -95,9 +102,16 @@ export async function listModels(s: LlmSettings): Promise<string[]> {
   return (data.models ?? []).map((m) => m.name)
 }
 
-export async function convertWithLlm(text: string, s: LlmSettings, signal?: AbortSignal): Promise<ConvertResult> {
-  const input = text.trim().slice(0, MAX_INPUT)
-  if (!input) throw new Error('Cole o texto com as notas.')
+export async function convertWithLlm(input: ConvertInput, s: LlmSettings, signal?: AbortSignal): Promise<ConvertResult> {
+  const text = (input.text ?? '').trim().slice(0, MAX_INPUT)
+  const images = input.images ?? []
+  if (!text && images.length === 0) throw new Error('Cole um texto, um link ou um print com as notas.')
+
+  const last: { role: 'user'; content: string; images?: string[] } = {
+    role: 'user',
+    content: text || 'Extraia as notas da melodia desta imagem.',
+  }
+  if (images.length > 0) last.images = images
 
   const res = await call(s, '/api/chat', {
     method: 'POST',
@@ -108,12 +122,12 @@ export async function convertWithLlm(text: string, s: LlmSettings, signal?: Abor
       stream: false,
       think: false,
       format: SCHEMA,
-      options: { temperature: 0 },
+      options: { temperature: 0, num_ctx: 8192 },
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: EXAMPLE_INPUT },
         { role: 'assistant', content: JSON.stringify(EXAMPLE_OUTPUT) },
-        { role: 'user', content: input },
+        last,
       ],
     }),
   })
@@ -134,6 +148,49 @@ export function parseResult(content: string): ConvertResult {
   }
   const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null)
   const notes = str(o.notes, 4000)
-  if (!notes) throw new Error('A IA não encontrou notas nesse texto.')
-  return { title: str(o.title, 120), notes, comment: str(o.comment, 300) }
+  if (!notes) throw new Error('A IA não encontrou notas nesse conteúdo.')
+  return { title: str(o.title, 120), notes: notes.replace(/\s*\n\s*/g, ' | '), comment: str(o.comment, 300) }
+}
+
+// ---- Links ----
+
+// Leitor gratuito que devolve o texto de qualquer página e permite chamadas do navegador.
+const READER = 'https://r.jina.ai/'
+
+const NOTE_TOKEN =
+  /^\.*([A-Ga-g]|d[oó]|r[eé]|mi|f[aá]|sol?|l[aá]|si)(#|b|♯|♭)?-?\d?['’*^]*(:\d+(?:[.,]\d+)?)?[,;]*$/i
+
+/** Parte do texto da página que parece melodia: linhas em que a maioria das palavras são notas. */
+export function extractMelodyLines(page: string, max = MAX_INPUT): string {
+  const lines = page.replace(/\r/g, '').split('\n')
+  const title = lines.find((l) => l.startsWith('Title:'))
+  const kept = lines.filter((line) => {
+    const tokens = line.replace(/[|()[\]]/g, ' ').split(/\s+/).filter(Boolean)
+    const notes = tokens.filter((t) => NOTE_TOKEN.test(t)).length
+    return notes >= 2 && notes / tokens.length >= 0.6
+  })
+  const text = kept.length > 0 ? [title, ...kept].filter(Boolean).join('\n') : page
+  return text.slice(0, max)
+}
+
+export async function fetchPageText(url: string, signal?: AbortSignal): Promise<string> {
+  let parsed: URL
+  try {
+    parsed = new URL(url.trim())
+  } catch {
+    throw new Error('Link inválido. Cole o endereço completo, começando com https://')
+  }
+  if (!/^https?:$/.test(parsed.protocol)) throw new Error('O link precisa começar com http:// ou https://')
+
+  let res: Response
+  try {
+    res = await fetch(READER + parsed.href, { signal, headers: { accept: 'text/plain' } })
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') throw e
+    throw new Error('Não consegui abrir esse link agora. Tente de novo, ou copie o texto da página e cole.')
+  }
+  if (!res.ok) throw new Error(`Não consegui ler a página (erro ${res.status}). Copie o texto da página e cole.`)
+  const text = extractMelodyLines(await res.text())
+  if (!text.trim()) throw new Error('A página veio vazia. Copie o texto da página e cole.')
+  return text
 }
