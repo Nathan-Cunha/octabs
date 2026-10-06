@@ -14,7 +14,7 @@ export default defineConfig({
       manifest: {
         name: 'OcTabs — Tablaturas de Ocarina',
         short_name: 'OcTabs',
-        description: 'Tablaturas para ocarina de 12 furos',
+        description: 'Tablaturas para ocarina de 12 e de 6 furos',
         lang: 'pt-BR',
         theme_color: '#1f2a44',
         background_color: '#faf7f0',

@@ -1,15 +1,15 @@
+import { OCARINA_12, type Instrument } from '../ocarina/instruments'
 import { isNote, type MelodyItem } from './types'
 
 /** Extensão da ocarina de 12 furos Alto C (escrita): Lá4 (A4 = 69) até Fá6 (F6 = 89). */
-export const OCARINA_LOW = 69
-export const OCARINA_HIGH = 89
-
-/** Classes de altura que exigem dedilhado cruzado (acidentes, fora Lá# grave via sub-hole). */
-const ACCIDENTAL_PCS = new Set([1, 3, 6, 8, 10])
+export const OCARINA_LOW = OCARINA_12.low
+export const OCARINA_HIGH = OCARINA_12.high
 
 export interface TransposeScore {
   shift: number
+  /** Notas que não saem na ocarina (fora da extensão ou sem dedilhado). */
   outOfRange: number
+  /** Notas com dedilhado cruzado ou menos confiável. */
   accidentals: number
 }
 
@@ -18,28 +18,27 @@ export function applyTranspose(items: MelodyItem[], shift: number): MelodyItem[]
   return items.map((it) => (isNote(it) ? { ...it, midi: it.midi + shift } : it))
 }
 
-export function scoreShift(items: MelodyItem[], shift: number): TransposeScore {
+export function scoreShift(items: MelodyItem[], shift: number, inst: Instrument = OCARINA_12): TransposeScore {
   let outOfRange = 0
   let accidentals = 0
   for (const it of items) {
     if (!isNote(it)) continue
-    const m = it.midi + shift
-    if (m < OCARINA_LOW || m > OCARINA_HIGH) outOfRange++
-    // Lá#4 (70) sai com sub-hole, não conta como cruzado.
-    else if (ACCIDENTAL_PCS.has(m % 12) && m !== 70) accidentals++
+    const cost = inst.cost(it.midi + shift)
+    if (cost === null) outOfRange++
+    else if (cost > 0) accidentals++
   }
   return { shift, outOfRange, accidentals }
 }
 
 /**
  * Escolhe o melhor deslocamento entre -24 e +24 semitons:
- * 1º menos notas fora da extensão, 2º menos dedilhados cruzados, 3º menor deslocamento.
+ * 1º menos notas que não saem, 2º menos dedilhados cruzados, 3º menor deslocamento.
  */
-export function bestTranspose(items: MelodyItem[]): number {
+export function bestTranspose(items: MelodyItem[], inst: Instrument = OCARINA_12): number {
   if (!items.some(isNote)) return 0
   let best: TransposeScore | null = null
   for (let shift = -24; shift <= 24; shift++) {
-    const s = scoreShift(items, shift)
+    const s = scoreShift(items, shift, inst)
     if (
       !best ||
       s.outOfRange < best.outOfRange ||

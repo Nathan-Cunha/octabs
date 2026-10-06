@@ -4,7 +4,9 @@ import { SongInput, type NewSongData } from './components/SongInput'
 import { SongView } from './components/SongView'
 import { bestTranspose } from './music/transpose'
 import type { Song } from './music/types'
+import { getInstrument, type InstrumentId } from './ocarina/instruments'
 import { deleteSong, listSongs, saveSong } from './storage/db'
+import { loadPref } from './storage/prefs'
 
 type View = { name: 'library' } | { name: 'new' } | { name: 'song'; song: Song; saved: boolean }
 
@@ -19,12 +21,14 @@ export function App() {
 
   function create(data: NewSongData) {
     const now = Date.now()
+    const instrument = getInstrument(loadPref<InstrumentId>('instrument', '12'))
     const song: Song = {
       id: crypto.randomUUID(),
       title: data.title,
       source: data.source,
       items: data.items,
-      transpose: bestTranspose(data.items),
+      instrument: instrument.id,
+      transpose: bestTranspose(data.items, instrument),
       bpm: data.bpm ?? 100,
       createdAt: now,
       updatedAt: now,

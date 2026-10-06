@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { playMelody, playNote, type PlayHandle } from '../audio/player'
 import { applyTranspose, bestTranspose, scoreShift } from '../music/transpose'
 import { isNote, type Song } from '../music/types'
+import { getInstrument, INSTRUMENTS, type InstrumentId } from '../ocarina/instruments'
+import { loadPref, savePref } from '../storage/prefs'
 import { TabSheet } from './TabSheet'
 
 interface Props {
@@ -9,23 +11,6 @@ interface Props {
   saved: boolean
   onBack(): void
   onSave(song: Song): void
-}
-
-function loadPref<T>(key: string, fallback: T): T {
-  try {
-    const v = localStorage.getItem(`octabs:${key}`)
-    return v === null ? fallback : (JSON.parse(v) as T)
-  } catch {
-    return fallback
-  }
-}
-
-function savePref(key: string, value: unknown) {
-  try {
-    localStorage.setItem(`octabs:${key}`, JSON.stringify(value))
-  } catch {
-    /* sem armazenamento: ignora */
-  }
 }
 
 export function SongView({ song: initial, saved, onBack, onSave }: Props) {
@@ -37,14 +22,18 @@ export function SongView({ song: initial, saved, onBack, onSave }: Props) {
   const [lang, setLang] = useState<'pt' | 'en'>(() => loadPref('lang', 'pt'))
   const handle = useRef<PlayHandle | null>(null)
 
+  const instrument = getInstrument(song.instrument)
   const items = useMemo(() => applyTranspose(song.items, song.transpose), [song.items, song.transpose])
-  const outOfRange = useMemo(() => scoreShift(song.items, song.transpose).outOfRange, [song])
+  const outOfRange = useMemo(
+    () => scoreShift(song.items, song.transpose, instrument).outOfRange,
+    [song.items, song.transpose, instrument],
+  )
 
   // Salva automaticamente mudanças de tom/andamento em músicas já salvas.
   useEffect(() => {
     if (saved && song !== initial) onSave(song)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [song.transpose, song.bpm, song.title])
+  }, [song.transpose, song.bpm, song.title, song.instrument])
 
   useEffect(() => savePref('showNames', showNames), [showNames])
   useEffect(() => savePref('lang', lang), [lang])
@@ -101,6 +90,13 @@ export function SongView({ song: initial, saved, onBack, onSave }: Props) {
     setSong((s) => ({ ...s, transpose: s.transpose + delta }))
   }
 
+  // Trocar de ocarina já escolhe o melhor tom para ela.
+  function changeInstrument(id: InstrumentId) {
+    stop()
+    savePref('instrument', id)
+    setSong((s) => ({ ...s, instrument: id, transpose: bestTranspose(s.items, getInstrument(id)) }))
+  }
+
   return (
     <div>
       <div className="topbar">
@@ -116,6 +112,18 @@ export function SongView({ song: initial, saved, onBack, onSave }: Props) {
       </div>
 
       <div className="card row">
+        <div className="segmented" role="radiogroup" aria-label="Ocarina">
+          {INSTRUMENTS.map((inst) => (
+            <button
+              key={inst.id}
+              role="radio"
+              aria-checked={inst.id === instrument.id}
+              onClick={() => inst.id !== instrument.id && changeInstrument(inst.id)}
+            >
+              {inst.name}
+            </button>
+          ))}
+        </div>
         <span>
           Tom: <strong>{song.transpose > 0 ? `+${song.transpose}` : song.transpose}</strong> semitons
         </span>
@@ -125,7 +133,7 @@ export function SongView({ song: initial, saved, onBack, onSave }: Props) {
         <button className="btn" onClick={() => shift(1)} aria-label="Meio tom acima">
           +
         </button>
-        <button className="btn" onClick={() => shift(bestTranspose(song.items) - song.transpose)}>
+        <button className="btn" onClick={() => shift(bestTranspose(song.items, instrument) - song.transpose)}>
           Auto
         </button>
         <label className="row">
@@ -137,12 +145,13 @@ export function SongView({ song: initial, saved, onBack, onSave }: Props) {
         </button>
         {outOfRange > 0 && (
           <span className="warn">
-            {outOfRange} nota{outOfRange === 1 ? '' : 's'} fora da extensão da ocarina
+            {outOfRange} nota{outOfRange === 1 ? '' : 's'} que não sa{outOfRange === 1 ? 'i' : 'em'} na ocarina de{' '}
+            {instrument.name}
           </span>
         )}
       </div>
 
-      <TabSheet items={items} current={current} showNames={showNames} lang={lang} onTap={tap} />
+      <TabSheet items={items} instrument={instrument} current={current} showNames={showNames} lang={lang} onTap={tap} />
 
       <div className="player">
         <button

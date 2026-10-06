@@ -56,6 +56,7 @@ export function Library({ songs, onOpen, onNew, onDelete, onImported }: Props) {
                   {s.title}
                   <span className="meta">
                     {s.items.filter((i) => i.kind === 'note' && i.midi !== null).length} notas
+                    {s.instrument === '6' && ' · 6 furos'}
                     {s.transpose !== 0 && ` · transposta ${s.transpose > 0 ? '+' : ''}${s.transpose}`}
                   </span>
                 </button>

@@ -1,17 +1,17 @@
 import { midiToName, type MelodyItem, type NoteEvent } from '../music/types'
-import { OCARINA_HIGH, OCARINA_LOW } from '../music/transpose'
-import { fingeringFor } from '../ocarina/fingerings'
+import type { Instrument } from '../ocarina/instruments'
 import { OcarinaSvg } from '../ocarina/OcarinaSvg'
 
 interface Props {
   items: MelodyItem[]
+  instrument: Instrument
   current: number
   showNames: boolean
   lang: 'pt' | 'en'
   onTap(index: number): void
 }
 
-export function TabSheet({ items, current, showNames, lang, onTap }: Props) {
+export function TabSheet({ items, instrument, current, showNames, lang, onTap }: Props) {
   // Agrupa em frases; cada figurinha guarda o índice original para o player.
   const phrases: { note: NoteEvent; index: number }[][] = [[]]
   items.forEach((item, index) => {
@@ -40,11 +40,13 @@ export function TabSheet({ items, current, showNames, lang, onTap }: Props) {
                   </div>
                 )
               }
-              const out = note.midi < OCARINA_LOW || note.midi > OCARINA_HIGH
+              const fingering = instrument.fingering(note.midi)
+              const out = fingering === null
               return (
                 <div key={index} onClick={() => onTap(index)}>
                   <OcarinaSvg
-                    fingering={fingeringFor(note.midi)}
+                    instrument={instrument.id}
+                    fingering={fingering}
                     label={showNames || out ? midiToName(note.midi, lang) : undefined}
                     highlight={index === current}
                     outOfRange={out}

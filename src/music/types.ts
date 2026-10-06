@@ -1,3 +1,5 @@
+import type { InstrumentId } from '../ocarina/instruments'
+
 // Formato interno único: colar notas, MIDI e busca por IA convergem aqui.
 
 /** Uma nota (midi = número MIDI, 60 = Dó central/C4) ou uma pausa (midi = null). */
@@ -22,6 +24,8 @@ export interface Song {
   source?: string
   /** Melodia no tom original, como foi informada. */
   items: MelodyItem[]
+  /** Ocarina usada na tablatura (sem o campo = 12 furos, músicas antigas). */
+  instrument?: InstrumentId
   /** Deslocamento em semitons aplicado para caber na ocarina. */
   transpose: number
   /** Andamento em batidas por minuto. */
